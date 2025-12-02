@@ -1,74 +1,90 @@
+using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
-[RequireComponent (typeof(MeshFilter))]
-public class TerrainGeneration : MonoBehaviour
+public class TerrainGenerator : MonoBehaviour
 {
-    Mesh mesh;
-    Vector3[] vertices;
-    int[] triangles;
+    public enum DrawMode { NoiseMap,ColorMap, Mesh};
+    public DrawMode drawMode;
 
-    public int xSize;
-    public int zSize;
-    public float noise;
-    [Range(.1f,2f)]
-    public float scale;
+    const int mapChunkSize = 241;
+    [Range(0,6)]
+    public int levelOfDetail;// Skips for loops intersection when doing mesh
+    public float noiseScale;
 
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
-    void Start()
-    {   
-        mesh = new Mesh();   
-        GetComponent<MeshFilter>().mesh = mesh;
-        CreateShape();
-        UpdateMesh();
-    }
+    public int octaves;
+    [Range(0,1)]
+    public float persistance;
+    public float lacunarity;
 
-    void CreateShape()
+    public int seed;
+    public Vector2 offset;
+
+    public float meshHeightMultiplier;
+    public AnimationCurve meshHeightCurve;
+
+    public bool autoUpdate;
+    public bool randomSeed;
+
+    public TerrainType[] regions;
+
+    public void GenerateTerrain()
     {
-        vertices = new Vector3[(xSize + 1) * (zSize + 1)];
-
-        
-        for (int i = 0, z = 0; z <= zSize; z++)
+        if (randomSeed)
         {
-            for (int x = 0; x <= xSize; x++)
+            seed = Random.Range(0, 1000);
+        }
+        float[,] noiseMap = Noise.GenerateNoiseMap(mapChunkSize, mapChunkSize,seed,noiseScale,octaves,persistance,lacunarity,offset);
+        Color[] colorMap = new Color[mapChunkSize * mapChunkSize];
+
+        //Loops through the map and checks height and applies the region based of the height
+        for (int y = 0; y < mapChunkSize; y++)
+        {
+            for (int x = 0; x < mapChunkSize; x++)
             {
-                float y = Mathf.PerlinNoise(x * .1f, z *.1f) * noise;
-                vertices[i] = new Vector3(x, y, z);
-                i++;
+                float currentHeight = noiseMap[x,y];
+
+                for (int i = 0; i < regions.Length; i++)
+                {
+                    if (currentHeight <= regions[i].height)
+                    {
+                        colorMap[y * mapChunkSize + x] = regions[i].color;
+                        break;
+                    }
+                }
             }
         }
-
-        triangles = new int[xSize * zSize * 6];
-
-        int vert = 0;
-        int tris = 0;
-        for (int z = 0; z < zSize; z++)
+        TerrainDisplay terrainDisplay = FindAnyObjectByType<TerrainDisplay> ();
+        if (drawMode == DrawMode.NoiseMap)
         {
-            for (int x = 0; x < xSize; x++)
-            {
-                triangles[tris + 0] = vert + 0;
-                triangles[tris + 1] = vert + xSize + 1;
-                triangles[tris + 2] = vert + 1;
-                triangles[tris + 3] = vert + 1;
-                triangles[tris + 4] = vert + xSize + 1;
-                triangles[tris + 5] = vert + xSize + 2;
-
-                vert++;
-                tris += 6;
-            }
-            vert++;
+            terrainDisplay.DrawTexture(TextureGenerator.TextureFromHeightMap(noiseMap));
         }
-        
-
-
-
+        else if (drawMode == DrawMode.ColorMap)
+        {
+            terrainDisplay.DrawTexture(TextureGenerator.TextureFromColorMap(colorMap,mapChunkSize,mapChunkSize));
+        }
+        else if (drawMode == DrawMode.Mesh)
+        {
+            terrainDisplay.DrawMesh(MeshGenerator.GenerateTerrainMesh(noiseMap, meshHeightMultiplier, meshHeightCurve,levelOfDetail), TextureGenerator.TextureFromColorMap(colorMap, mapChunkSize, mapChunkSize));
+        }
     }
 
-    void UpdateMesh()
+    private void OnValidate()
     {
-        mesh.Clear();
-
-        mesh.vertices = vertices;
-        mesh.triangles = triangles;
-
-        mesh.RecalculateNormals();
+        if (lacunarity < 1)
+        {
+            lacunarity = 1;
+        }
+        if (octaves < 1)
+        {
+            octaves = 1;
+        }
     }
+}
+
+[System.Serializable]
+public struct TerrainType
+{
+    public string name;
+    public float height;
+    public Color color;
 }
